@@ -3,6 +3,7 @@ package org.beltran;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Scanner;
@@ -29,10 +30,9 @@ public class Main {
     private static final String TYPE_TRANSFER_IN = "TRANSFER-IN";
     private static final String TYPE_TRANSFER_OUT = "TRANSFER-OUT";
 
-    // record = {number, holder, pin, balance, failedAttempts, locked, active}
-    private static final ArrayList<String[]> ACCOUNTS = new ArrayList<String[]>();
-    private static final int NUM = 0, HOLDER = 1, PIN = 2,
-            BALANCE = 3, FAILED = 4, LOCKED = 5, ACTIVE = 6;
+    // Each account is one database-style row: number, holder, pin, balance,
+    // failed, locked, active.
+    private static final ArrayList<LinkedHashMap<String, String>> ACCOUNTS = new ArrayList<>();
 
     // Each record: accountNumber|type|amount|balanceAfter|timestamp|counterparty
     private static final List<String> TRANSACTION_LOG = new ArrayList<String>();
@@ -57,7 +57,7 @@ public class Main {
             System.out.println("\n  Sign-in failed. Exiting the session.");
             return;
         }
-        String sessionAccount = ACCOUNTS.get(sessionIndex)[NUM];
+        String sessionAccount = numberOf(sessionIndex);
 
         boolean running = true;
         while (running) {
@@ -149,22 +149,76 @@ public class Main {
         System.out.println("\n  Thank you for banking with us. Goodbye!");
     }
 
-    // ------------------------------------------------------------------
-    // Setup and lookup
-    // ------------------------------------------------------------------
 
+    // number | holder_name    | pin  | balance   | failed | locked | active
     private static void seedData() {
         ACCOUNTS.clear();
-        // PIN equals the account number; 1003 starts inactive.
-        addAccount("1001", "Juan Dela Cruz", 25000.00, true);
-        addAccount("1002", "Maria Santos", 50000.00, true);
-        addAccount("1003", "Pedro Reyes", 10000.00, false);
+        ACCOUNTS.add(row("1001", "Juan Dela Cruz", "25000.00", true ));
+        ACCOUNTS.add(row("1002", "Maria Santos",   "50000.00", true ));
+        ACCOUNTS.add(row("1003", "Pedro Reyes",    "10000.00", false));
         TRANSACTION_LOG.clear();
     }
 
-    private static void addAccount(String number, String holder, double balance, boolean active) {
-        ACCOUNTS.add(new String[]{number, holder, number,
-                String.format("%.2f", balance), "0", "false", active ? "true" : "false"});
+    // Builds one database row; the PIN always equals the account number.
+    private static LinkedHashMap<String, String> row(String number, String holder,
+            String balance, boolean active) {
+        LinkedHashMap<String, String> r = new LinkedHashMap<>();
+        r.put("number", number);
+        r.put("holder", holder);
+        r.put("pin", number);
+        r.put("balance", balance);
+        r.put("failed", "0");
+        r.put("locked", "false");
+        r.put("active", active ? "true" : "false");
+        return r;
+    }
+
+    private static String get(int index, String field) {
+        return ACCOUNTS.get(index).get(field);
+    }
+
+    private static void put(int index, String field, String value) {
+        ACCOUNTS.get(index).put(field, value);
+    }
+
+    private static String numberOf(int index) {
+        return get(index, "number");
+    }
+
+    private static String holderOf(int index) {
+        return get(index, "holder");
+    }
+
+    private static String pinOf(int index) {
+        return get(index, "pin");
+    }
+
+    private static double balanceOf(int index) {
+        return parseDouble(get(index, "balance"));
+    }
+
+    private static void setBalance(int index, double value) {
+        put(index, "balance", String.format("%.2f", value));
+    }
+
+    private static int failedOf(int index) {
+        return (int) parseDouble(get(index, "failed"));
+    }
+
+    private static void setFailed(int index, int value) {
+        put(index, "failed", String.valueOf(value));
+    }
+
+    private static boolean isLocked(int index) {
+        return parseBoolean(get(index, "locked"));
+    }
+
+    private static void setLocked(int index, boolean value) {
+        put(index, "locked", String.valueOf(value));
+    }
+
+    private static boolean isActive(int index) {
+        return parseBoolean(get(index, "active"));
     }
 
     private static int findAccountIndex(String accountNumber) {
@@ -173,47 +227,11 @@ public class Main {
         }
         String cleaned = accountNumber.trim();
         for (int i = 0; i < ACCOUNTS.size(); i++) {
-            if (ACCOUNTS.get(i)[NUM].equals(cleaned)) {
+            if (numberOf(i).equals(cleaned)) {
                 return i;
             }
         }
         return -1;
-    }
-
-    private static String holderOf(int index) {
-        return ACCOUNTS.get(index)[HOLDER];
-    }
-
-    private static String pinOf(int index) {
-        return ACCOUNTS.get(index)[PIN];
-    }
-
-    private static double balanceOf(int index) {
-        return parseDouble(ACCOUNTS.get(index)[BALANCE]);
-    }
-
-    private static void setBalance(int index, double value) {
-        ACCOUNTS.get(index)[BALANCE] = String.format("%.2f", value);
-    }
-
-    private static int failedOf(int index) {
-        return (int) parseDouble(ACCOUNTS.get(index)[FAILED]);
-    }
-
-    private static void setFailed(int index, int value) {
-        ACCOUNTS.get(index)[FAILED] = String.valueOf(value);
-    }
-
-    private static boolean isLocked(int index) {
-        return parseBoolean(ACCOUNTS.get(index)[LOCKED]);
-    }
-
-    private static void setLocked(int index, boolean value) {
-        ACCOUNTS.get(index)[LOCKED] = String.valueOf(value);
-    }
-
-    private static boolean isActive(int index) {
-        return parseBoolean(ACCOUNTS.get(index)[ACTIVE]);
     }
 
     // ------------------------------------------------------------------
@@ -236,7 +254,7 @@ public class Main {
             return -1;
         }
         if (isLocked(index)) {
-            lastMessage = "Login failed. Account " + ACCOUNTS.get(index)[NUM] + " is LOCKED after "
+            lastMessage = "Login failed. Account " + numberOf(index) + " is LOCKED after "
                     + MAX_FAILED_ATTEMPTS + " failed attempts. Please contact the branch.";
             return -1;
         }
@@ -245,7 +263,7 @@ public class Main {
             setFailed(index, attempts);
             if (attempts >= MAX_FAILED_ATTEMPTS) {
                 setLocked(index, true);
-                lastMessage = "Login failed. Invalid PIN. Account " + ACCOUNTS.get(index)[NUM]
+                lastMessage = "Login failed. Invalid PIN. Account " + numberOf(index)
                         + " is now LOCKED after " + MAX_FAILED_ATTEMPTS + " failed attempts.";
             } else {
                 lastMessage = "Login failed. Invalid PIN. Attempt " + attempts
@@ -257,7 +275,7 @@ public class Main {
 
         setFailed(index, 0);
         lastMessage = "Login successful. Welcome, " + holderOf(index)
-                + " (Account " + ACCOUNTS.get(index)[NUM] + ").";
+                + " (Account " + numberOf(index) + ").";
         return index;
     }
 
@@ -293,55 +311,7 @@ public class Main {
         return -1;
     }
 
-    // ------------------------------------------------------------------
-    // Validation
-    // ------------------------------------------------------------------
-
     // Inactive accounts may sign in and view data, but cannot move money.
-    private static int validateAccount(String accountNumber) {
-        int index = findAccountIndex(accountNumber);
-        if (index < 0 || isLocked(index) || !isActive(index)) {
-            return -1;
-        }
-        return index;
-    }
-
-    private static boolean validateAmount(double amount) {
-        if (Double.isNaN(amount) || Double.isInfinite(amount)) {
-            return false;
-        }
-        return amount > 0 && amount <= MAX_SINGLE_AMOUNT;
-    }
-
-    private static String accountIssue(String accountNumber) {
-        if (accountNumber == null || accountNumber.trim().isEmpty()) {
-            return "Account number is required.";
-        }
-        int index = findAccountIndex(accountNumber);
-        if (index < 0) {
-            return "Account " + accountNumber.trim() + " does not exist.";
-        }
-        if (isLocked(index)) {
-            return "Account " + ACCOUNTS.get(index)[NUM] + " is LOCKED after "
-                    + MAX_FAILED_ATTEMPTS + " failed attempts. Please contact the branch.";
-        }
-        if (!isActive(index)) {
-            return "Account " + ACCOUNTS.get(index)[NUM]
-                    + " is INACTIVE. Transactions are blocked. Please contact the branch.";
-        }
-        return "";
-    }
-
-    private static String amountIssue(double amount) {
-        if (Double.isNaN(amount) || Double.isInfinite(amount)) {
-            return "Amount must be a valid number.";
-        }
-        if (amount <= 0) {
-            return "Amount must be greater than 0.00.";
-        }
-        return "Amount must not exceed " + formatPeso(MAX_SINGLE_AMOUNT) + ".";
-    }
-
     private static boolean recordTransaction(int accountIndex, String type, double amount,
                                              String counterparty) {
         if (accountIndex < 0 || accountIndex >= ACCOUNTS.size()) {
@@ -352,7 +322,7 @@ public class Main {
         String settled = String.format("%.2f", amount);
         String balanceAfter = String.format("%.2f", balanceOf(accountIndex));
         String party = counterparty == null ? "" : counterparty;
-        TRANSACTION_LOG.add(ACCOUNTS.get(accountIndex)[NUM] + "|" + type + "|"
+        TRANSACTION_LOG.add(numberOf(accountIndex) + "|" + type + "|"
                 + settled + "|" + balanceAfter + "|" + timestamp + "|" + party);
         return true;
     }
@@ -362,89 +332,117 @@ public class Main {
     // ------------------------------------------------------------------
 
     private static boolean depositFunds(String accountNumber, double amount) {
-        int index = validateAccount(accountNumber);
-        if (index < 0) {
-            lastMessage = "Deposit failed. " + accountIssue(accountNumber);
-            return false;
+        int index = findAccountIndex(accountNumber);
+        boolean validAmount = !Double.isNaN(amount) && !Double.isInfinite(amount)
+                && amount > 0 && amount <= MAX_SINGLE_AMOUNT;
+        if (index >= 0 && !isLocked(index) && isActive(index)) {
+            if (validAmount) {
+                double value = roundToCentavos(amount);
+                setBalance(index, roundToCentavos(balanceOf(index) + value));
+                recordTransaction(index, TYPE_DEPOSIT, value, "");
+                lastMessage = "Deposit successful. " + formatPeso(value) + " deposited to Account "
+                        + numberOf(index) + ". New balance: " + formatPeso(balanceOf(index)) + ".";
+                return true;
+            }
+            lastMessage = "Deposit failed. " + (Double.isNaN(amount) || Double.isInfinite(amount)
+                    ? "Amount must be a valid number."
+                    : amount <= 0 ? "Amount must be greater than 0.00."
+                    : "Amount must not exceed " + formatPeso(MAX_SINGLE_AMOUNT) + ".");
+        } else {
+            lastMessage = "Deposit failed. " + (index < 0
+                    ? "Account " + describe(accountNumber) + " does not exist."
+                    : isLocked(index) ? "Account " + numberOf(index) + " is LOCKED after "
+                            + MAX_FAILED_ATTEMPTS + " failed attempts. Please contact the branch."
+                    : "Account " + numberOf(index)
+                            + " is INACTIVE. Transactions are blocked. Please contact the branch.");
         }
-        if (!validateAmount(amount)) {
-            lastMessage = "Deposit failed. " + amountIssue(amount);
-            return false;
-        }
-
-        double value = roundToCentavos(amount);
-        setBalance(index, roundToCentavos(balanceOf(index) + value));
-        recordTransaction(index, TYPE_DEPOSIT, value, "");
-        lastMessage = "Deposit successful. " + formatPeso(value) + " deposited to Account "
-                + ACCOUNTS.get(index)[NUM] + ". New balance: " + formatPeso(balanceOf(index)) + ".";
-        return true;
+        return false;
     }
 
     private static boolean withdrawFunds(String accountNumber, double amount) {
-        int index = validateAccount(accountNumber);
-        if (index < 0) {
-            lastMessage = "Withdrawal failed. " + accountIssue(accountNumber);
-            return false;
+        int index = findAccountIndex(accountNumber);
+        boolean validAmount = !Double.isNaN(amount) && !Double.isInfinite(amount)
+                && amount > 0 && amount <= MAX_SINGLE_AMOUNT;
+        if (index >= 0 && !isLocked(index) && isActive(index)) {
+            if (validAmount) {
+                double value = roundToCentavos(amount);
+                if (value <= balanceOf(index)) {
+                    setBalance(index, roundToCentavos(balanceOf(index) - value));
+                    recordTransaction(index, TYPE_WITHDRAWAL, value, "");
+                    lastMessage = "Withdrawal successful. " + formatPeso(value) + " withdrawn from Account "
+                            + numberOf(index) + ". New balance: " + formatPeso(balanceOf(index)) + ".";
+                    return true;
+                }
+                lastMessage = "Withdrawal failed. Insufficient balance to withdraw "
+                        + formatPeso(value) + ". Available: " + formatPeso(balanceOf(index)) + ".";
+            } else {
+                lastMessage = "Withdrawal failed. " + (Double.isNaN(amount) || Double.isInfinite(amount)
+                        ? "Amount must be a valid number."
+                        : amount <= 0 ? "Amount must be greater than 0.00."
+                        : "Amount must not exceed " + formatPeso(MAX_SINGLE_AMOUNT) + ".");
+            }
+        } else {
+            lastMessage = "Withdrawal failed. " + (index < 0
+                    ? "Account " + describe(accountNumber) + " does not exist."
+                    : isLocked(index) ? "Account " + numberOf(index) + " is LOCKED after "
+                            + MAX_FAILED_ATTEMPTS + " failed attempts. Please contact the branch."
+                    : "Account " + numberOf(index)
+                            + " is INACTIVE. Transactions are blocked. Please contact the branch.");
         }
-        if (!validateAmount(amount)) {
-            lastMessage = "Withdrawal failed. " + amountIssue(amount);
-            return false;
-        }
-
-        double value = roundToCentavos(amount);
-        if (value > balanceOf(index)) {
-            lastMessage = "Withdrawal failed. Insufficient balance to withdraw "
-                    + formatPeso(value) + ". Available: " + formatPeso(balanceOf(index)) + ".";
-            return false;
-        }
-
-        setBalance(index, roundToCentavos(balanceOf(index) - value));
-        recordTransaction(index, TYPE_WITHDRAWAL, value, "");
-        lastMessage = "Withdrawal successful. " + formatPeso(value) + " withdrawn from Account "
-                + ACCOUNTS.get(index)[NUM] + ". New balance: " + formatPeso(balanceOf(index)) + ".";
-        return true;
+        return false;
     }
 
     private static boolean transferFunds(String sourceNumber, String destinationNumber,
                                          double amount) {
-        int sourceIndex = validateAccount(sourceNumber);
-        if (sourceIndex < 0) {
-            lastMessage = "Transfer failed. Source account: " + accountIssue(sourceNumber);
-            return false;
+        int src = findAccountIndex(sourceNumber);
+        int dst = findAccountIndex(destinationNumber);
+        boolean validAmount = !Double.isNaN(amount) && !Double.isInfinite(amount)
+                && amount > 0 && amount <= MAX_SINGLE_AMOUNT;
+        if (src >= 0 && !isLocked(src) && isActive(src)
+                && dst >= 0 && !isLocked(dst) && isActive(dst)) {
+            if (src != dst) {
+                if (validAmount) {
+                    double value = roundToCentavos(amount);
+                    if (value <= balanceOf(src)) {
+                        setBalance(src, roundToCentavos(balanceOf(src) - value));
+                        setBalance(dst, roundToCentavos(balanceOf(dst) + value));
+                        recordTransaction(src, TYPE_TRANSFER_OUT, value,
+                                "To " + numberOf(dst) + " (" + holderOf(dst) + ")");
+                        recordTransaction(dst, TYPE_TRANSFER_IN, value,
+                                "From " + numberOf(src) + " (" + holderOf(src) + ")");
+                        lastMessage = "Transfer successful. " + formatPeso(value) + " sent from Account "
+                                + numberOf(src) + " to Account " + numberOf(dst)
+                                + ". Source balance: " + formatPeso(balanceOf(src))
+                                + " | Destination balance: " + formatPeso(balanceOf(dst)) + ".";
+                        return true;
+                    }
+                    lastMessage = "Transfer failed. Insufficient balance in Account "
+                            + numberOf(src) + " to send " + formatPeso(value) + ". Available: "
+                            + formatPeso(balanceOf(src)) + ".";
+                } else {
+                    lastMessage = "Transfer failed. " + (Double.isNaN(amount) || Double.isInfinite(amount)
+                            ? "Amount must be a valid number."
+                            : amount <= 0 ? "Amount must be greater than 0.00."
+                            : "Amount must not exceed " + formatPeso(MAX_SINGLE_AMOUNT) + ".");
+                }
+            } else {
+                lastMessage = "Transfer failed. Source and destination must be different accounts.";
+            }
+        } else {
+            lastMessage = "Transfer failed. " + (src < 0
+                    ? "Source account " + describe(sourceNumber) + " does not exist."
+                    : isLocked(src) ? "Source account " + numberOf(src) + " is LOCKED after "
+                            + MAX_FAILED_ATTEMPTS + " failed attempts. Please contact the branch."
+                    : !isActive(src) ? "Source account " + numberOf(src)
+                            + " is INACTIVE. Transactions are blocked. Please contact the branch."
+                    : dst < 0 ? "Destination account " + describe(destinationNumber)
+                            + " does not exist."
+                    : isLocked(dst) ? "Destination account " + numberOf(dst) + " is LOCKED after "
+                            + MAX_FAILED_ATTEMPTS + " failed attempts. Please contact the branch."
+                    : "Destination account " + numberOf(dst)
+                            + " is INACTIVE. Transactions are blocked. Please contact the branch.");
         }
-        int destinationIndex = validateAccount(destinationNumber);
-        if (destinationIndex < 0) {
-            lastMessage = "Transfer failed. Destination account: " + accountIssue(destinationNumber);
-            return false;
-        }
-        if (sourceIndex == destinationIndex) {
-            lastMessage = "Transfer failed. Source and destination must be different accounts.";
-            return false;
-        }
-        if (!validateAmount(amount)) {
-            lastMessage = "Transfer failed. " + amountIssue(amount);
-            return false;
-        }
-
-        double value = roundToCentavos(amount);
-        if (value > balanceOf(sourceIndex)) {
-            lastMessage = "Transfer failed. Insufficient balance in Account "
-                    + ACCOUNTS.get(sourceIndex)[NUM] + " to send " + formatPeso(value)
-                    + ". Available: " + formatPeso(balanceOf(sourceIndex)) + ".";
-            return false;
-        }
-
-        setBalance(sourceIndex, roundToCentavos(balanceOf(sourceIndex) - value));
-        setBalance(destinationIndex, roundToCentavos(balanceOf(destinationIndex) + value));
-        recordTransaction(sourceIndex, TYPE_TRANSFER_OUT, value,
-                "To " + ACCOUNTS.get(destinationIndex)[NUM] + " (" + holderOf(destinationIndex) + ")");
-        recordTransaction(destinationIndex, TYPE_TRANSFER_IN, value,
-                "From " + ACCOUNTS.get(sourceIndex)[NUM] + " (" + holderOf(sourceIndex) + ")");
-        lastMessage = "Transfer successful. " + formatPeso(value) + " sent from Account "
-                + ACCOUNTS.get(sourceIndex)[NUM] + " to Account " + ACCOUNTS.get(destinationIndex)[NUM]
-                + ". Source balance: " + formatPeso(balanceOf(sourceIndex))
-                + " | Destination balance: " + formatPeso(balanceOf(destinationIndex)) + ".";
-        return true;
+        return false;
     }
 
     // ------------------------------------------------------------------
@@ -462,7 +460,7 @@ public class Main {
         System.out.println();
         System.out.println("  ACCOUNT INQUIRY");
         System.out.println("  ----------------------------------------------");
-        System.out.println("  Account Number : " + ACCOUNTS.get(index)[NUM]);
+        System.out.println("  Account Number : " + numberOf(index));
         System.out.println("  Holder Name    : " + holderOf(index));
         System.out.println("  Status         : " + status);
         System.out.println("  Failed Attempts: " + failedOf(index) + " of " + MAX_FAILED_ATTEMPTS);
@@ -479,7 +477,7 @@ public class Main {
             return;
         }
         System.out.println("\n  BALANCE INQUIRY");
-        System.out.println("  Account " + ACCOUNTS.get(index)[NUM] + " (" + holderOf(index) + ")");
+        System.out.println("  Account " + numberOf(index) + " (" + holderOf(index) + ")");
         System.out.println("  Available balance: " + formatPeso(balanceOf(index)));
         System.out.println();
     }
@@ -492,10 +490,10 @@ public class Main {
             return;
         }
 
-        String prefix = ACCOUNTS.get(index)[NUM] + "|";
+        String prefix = numberOf(index) + "|";
         int entries = 0;
         System.out.println();
-        System.out.println("  TRANSACTION HISTORY - " + ACCOUNTS.get(index)[NUM]
+        System.out.println("  TRANSACTION HISTORY - " + numberOf(index)
                 + " (" + holderOf(index) + ")");
         System.out.println("  Current balance: " + formatPeso(balanceOf(index)));
         System.out.println("  " + repeat('-', 72));
