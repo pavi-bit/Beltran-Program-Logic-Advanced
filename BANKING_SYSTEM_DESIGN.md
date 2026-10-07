@@ -155,7 +155,67 @@ performs (behaviors) are listed below.
 
 ## Activity 3 – Create the Class Design
 
-The class diagram below matches the implemented program (flat package `org.beltran`).
+The class design of the banking system follows a clear object-oriented
+structure, with relationships defined between entities, services, and utilities.
+At the top level, the `Main` class acts as the console/UI layer. It is
+responsible for bootstrapping the application, handling user input, and
+displaying outputs. `Main` depends on the `Bank` and `AuthenticationService`
+classes, delegating all business logic to them while keeping the user interface
+separate.
+
+The `Bank` class serves as the central facade for all banking operations. It
+composes both `Account` objects and `Transaction` records, meaning it owns and
+manages their lifecycle. The `Bank` validates accounts and amounts, orchestrates
+deposits, withdrawals, and transfers, and records transactions in its ledger.
+This ensures that all financial activity flows through a single, controlled
+entry point.
+
+The `AuthenticationService` class depends directly on the `Bank`. It handles
+login validation, PIN checks, and enforces the lockout policy after failed
+attempts. By separating authentication from transaction logic, the design
+maintains a clean division of responsibilities.
+
+The `Account` class is abstract and represents the core domain entity. Each
+account is associated with a `Customer`, establishing a one-to-many relationship
+where a customer may own multiple accounts. Accounts also record multiple
+`Transaction` entries, creating a history of activity. The abstract methods
+`maxWithdrawable()` and `getAccountType()` are implemented differently by
+subclasses, allowing polymorphic behavior.
+
+Two concrete subclasses extend `Account`: `SavingsAccount` and
+`CheckingAccount`. A `SavingsAccount` enforces a per-transaction cap of
+PHP 50,000.00, while a `CheckingAccount` allows withdrawals up to the full
+balance. This hierarchy demonstrates meaningful inheritance, where different
+account types enforce distinct rules without requiring changes to the Bank's
+logic.
+
+The `Customer` class represents the account holder and provides identity
+attributes such as customer ID and name. It supports the ownership relationship
+with accounts, ensuring that each account is tied to a specific customer.
+
+The `Transaction` class represents a single ledger entry. Each transaction
+records the account number, type, amount, balance after the operation,
+timestamp, and counterparty (for transfers). Transactions are owned by the
+`Bank` and associated with accounts, providing a complete audit trail of
+financial activity.
+
+The `TransactionType` enum defines the categories of transactions: Deposit,
+Withdrawal, Transfer In, and Transfer Out. This ensures consistency and prevents
+invalid transaction types from being introduced.
+
+The `OperationResult` class encapsulates the outcome of operations. It is
+returned by the `Bank` and `AuthenticationService` to indicate success or
+failure, along with a message, balance after the operation, and optional account
+data. This simplifies error handling and keeps the UI layer focused on
+displaying results.
+
+The `Format` utility class provides shared formatting helpers for currency,
+padding, rounding, and text alignment. It is used by `Main`, `Bank`, and
+`Account` to ensure consistent output formatting across the application.
+
+### Class diagram
+
+The diagram below matches the implemented program (flat package `org.beltran`).
 
 ```
                         +------------------+
@@ -239,133 +299,194 @@ Format:           static formatting helpers
 
 ## Activity 4 – Apply Encapsulation
 
-Object data is protected by making fields `private` and exposing carefully
-controlled access through methods. No part of the application can freely modify
-another object's data.
+Encapsulation was applied throughout the system to protect sensitive data and
+enforce business rules. Each class hides its internal state by declaring fields
+as private and exposing only controlled methods for access or modification.
 
-### Protected data and how it is changed
+### Account class
 
-| Data                       | Access                       | Mutation method(s)               |
-|----------------------------|------------------------------|----------------------------------|
-| `Account.balance`          | `getBalance()` (read-only)   | `deposit()` / `withdraw()`       |
-| `Account.pin`              | `matchesPin()` (comparison)  | none (immutable after creation)  |
-| `Account.failedLoginAttempts` | `getFailedLoginAttempts()` | `recordFailedLogin()` / `resetFailedLogins()` |
-| `Account.locked`           | `isLocked()`                 | `lock()` (only after 3rd failure) |
-| `Account.active`           | `isActive()`                 | none after construction          |
-| `Bank.accounts`            | not exposed directly          | only through `Bank` operations   |
-| `Bank.ledger`              | `transactionsFor()` (filtered copy) | `postTransaction()` (private) |
+The `balance` field is private and can only be changed through `deposit()` and
+`withdraw()`. These methods enforce rules such as rounding to centavos and
+checking the account status before updating; withdrawals additionally verify
+that the amount is within the balance and within the account type's
+per-transaction limit. Amount validity itself (non-numeric, zero/negative, above
+PHP 1,000,000.00) is enforced beforehand by `Bank.validateAmount()`.
 
-### Key points
+The `pin` field is immutable and never exposed directly. Verification is done
+only through `matchesPin(candidate)`, ensuring the actual PIN remains hidden.
 
-- **Balance is never set directly.** Outside code calls `Bank.deposit(...)`,
-  which invokes `Account.deposit(amount)`; the balance is updated only inside
-  the account through round-to-centavo arithmetic.
-- **Withdrawals are guarded inside the account.** An account refuses a
-  withdrawal when it is LOCKED, when it is INACTIVE, when the amount exceeds
-  the balance, or when the amount exceeds the account type's limit.
-- **PIN is opaque.** Verification is done by `matchesPin(candidate)`, so the
-  stored PIN never leaks to callers.
-- **The bank's collections are private.** Accounts and the ledger cannot be
-  modified from the console layer; `Main` works only through the `Bank` facade
-  and object getters.
+Login security is encapsulated with `failedLoginAttempts`, tracked internally.
+Methods like `recordFailedLogin()` and `resetFailedLogins()` manage this
+counter, while `lock()` enforces account lockout after repeated failures.
+
+### Bank class
+
+The collections of accounts and ledger are private. External code cannot
+directly manipulate them; instead, controlled methods like `findAccount(number)`
+and `transactionsFor(number)` provide safe access.
+
+Transactions are recorded only through the private `postTransaction()` method,
+ensuring the ledger remains consistent and tamper-proof.
+
+### OperationResult class
+
+Encapsulates the outcome of operations into a single object. The UI layer only
+needs to check `isSuccess()` or display `getMessage()`, without knowing the
+internal processing details.
+
+### AuthenticationService class
+
+Encapsulates login validation logic, interacting with the `Bank` to verify
+credentials. Failed attempts and lockout policies are enforced internally,
+preventing external bypass.
 
 ---
 
 ## Activity 5 – Apply Abstraction
 
-Implementation details that other parts of the program do not need to know are
-hidden behind clear, operation-level interfaces.
+Abstraction in the banking system was applied to simplify complex operations and
+hide unnecessary implementation details from the user and other parts of the
+program. By exposing only essential methods and concealing internal logic, the
+design ensures that each class provides a clear, high-level interface.
 
-### `Account` as an abstract operation layer
-Callers see a small business interface — `deposit()`, `withdraw()`,
-`getBalance()`, `getStatusLabel()`, `maxWithdrawable()` — and never the storage
-details (how the balance is stored, how rounding works, how status is computed).
+### Account class (abstract base)
 
-### `Bank` as a facade
-`Main` interacts with `Bank` through high-level operations only:
-`deposit()`, `withdraw()`, `transfer()`, `transactionsFor()`. The internal
-lookup of accounts, the validation of account state and amount limits, the seed
-data loading, and the transaction recording are all hidden.
+Defines shared operations such as `deposit()`, `withdraw()`, and `getBalance()`.
 
-### `OperationResult` as the result interface
-All service-layer operations return an `OperationResult` (`success`, `message`,
-and optional data). The console layer only needs to print `getMessage()` or
-branch on `isSuccess()`; it does not need to know *why* an operation succeeded
-or failed internally.
+Hides internal details like how balances are updated, how login attempts are
+tracked, and how lockouts are enforced.
 
-### Menu/IO abstraction
-`Main` owns the keyboard prompts, the menu loop, and the table rendering, so the
-domain classes stay free of console output concerns. Formatting (currency,
-column padding, rounding) is centralized in `Format`.
+Abstract methods (`maxWithdrawable()`, `getAccountType()`) force subclasses to
+provide specific rules without exposing the underlying mechanics.
+
+### Bank class (facade)
+
+Provides high-level operations (`deposit()`, `withdraw()`, `transfer()`) that
+clients can call directly.
+
+Internally, it handles account lookup, validation, and transaction recording,
+but these details are hidden from the caller.
+
+This abstraction allows the UI layer to interact with the `Bank` in simple
+terms, without worrying about the complexity of account management.
+
+### OperationResult class
+
+Abstracts the outcome of operations into a single object.
+
+Instead of exposing raw error codes or internal states, it provides simple
+methods like `isSuccess()` and `getMessage()`.
+
+This makes error handling and result reporting straightforward for the UI.
+
+### Main class (UI layer)
+
+Abstracts user interaction by providing menu options and prompts.
+
+The user does not see how input is parsed or how transactions are processed
+internally; they only interact with clear commands like "Deposit" or "Withdraw".
+
+### Format utility class
+
+Abstracts formatting logic for currency and text alignment.
+
+The rest of the system simply calls `formatPeso()` or `pad()`, without needing
+to know how rounding or alignment is implemented.
 
 ---
 
 ## Activity 6 – Apply Inheritance and Polymorphism
 
-Inheritance is used only where it provides a meaningful solution: account types
-with genuinely different behavior. It is not forced onto the design.
+Inheritance and polymorphism were applied to make the system flexible, reusable,
+and easier to extend. By defining shared behaviors in a base class and allowing
+subclasses to override them, the design supports different account types without
+duplicating code.
 
-### The hierarchy
+### Inheritance Structure
 
-```
-Account (abstract)
-  |- SavingsAccount
-  |- CheckingAccount
-```
+The `Account` class is abstract and serves as the base class for all account
+types.
 
-### Polymorphic behavior
+`SavingsAccount` and `CheckingAccount` both inherit from `Account`, gaining
+access to shared attributes (account number, owner, PIN, balance, status) and
+behaviors (deposit, withdraw, authentication).
 
-| Abstract member          | SavingsAccount                          | CheckingAccount            |
-|--------------------------|-----------------------------------------|----------------------------|
-| `maxWithdrawable()`      | `min(balance, 50,000.00)`               | `balance`                  |
-| `getAccountType()`       | `"SAVINGS"`                             | `"CHECKING"`               |
+This inheritance ensures that common logic is centralized, while specialized
+rules are implemented only in subclasses.
 
-- The `Bank` holds a `List<Account>` and treats every account polymorphically.
-  It never checks the concrete type; the correct limit is enforced by the
-  account itself through `maxWithdrawable()`.
-- `deposit()` and `withdraw()` are inherited from `Account`. `withdraw()`
-  consults the overridden `maxWithdrawable()`, so a Savings withdrawal above
-  PHP 50,000.00 is rejected while a CheckingAccount can withdraw down to the
-  full balance.
-- `getAccountType()` is displayed in the **Account / Balance Inquiry** screen,
-  demonstrating the attribute in the user interface.
+### Polymorphic Behavior
 
-### Why this is meaningful
-- A savings account is realistically subject to a stricter per-transaction
-  limit; a checking account has different, less restrictive rules.
-- Adding a new account type in the future means adding one subclass and its
-  `maxWithdrawable()`/`getAccountType()` overrides — no changes to `Bank`.
+The `withdraw()` method behaves differently depending on the account type:
+
+In a `SavingsAccount`, withdrawals are capped at PHP 50,000.00 per transaction.
+
+In a `CheckingAccount`, withdrawals can go up to the full balance.
+
+The `getAccountType()` method returns different labels ("SAVINGS" or "CHECKING"),
+depending on the subclass.
+
+The `maxWithdrawable()` method is overridden in each subclass to enforce
+account-specific rules.
 
 ---
 
 ## Activity 7 – Apply Composition and Object Relationships
 
-Objects interact through the relationships below, shown with their categories.
+Composition and object relationships were applied to model how classes
+collaborate at runtime. Instead of relying solely on inheritance, the system
+uses composition to build complex behaviors from simpler components.
 
-### Association
+### Bank as a central hub
 
-```
-Customer 1 <---------- * Account        (an account is owned by one customer;
-                                         a customer may own many accounts)
-Account  1 ------------ * Transaction    (an account records many transactions)
-AuthenticationService  ----->  Bank       (the service depends on the bank's
-                                          account lookup)
-```
+Composes a collection of `Account` objects and a ledger of `Transaction`
+records.
 
-### Aggregation / Composition
+Owns these objects, meaning their lifecycle is tied to the `Bank`.
 
-```
-Bank 1 ---------- * Account
-        composition: the Bank creates its accounts in its constructor
-        (seedAccounts()); the accounts have no independent lifecycle apart
-        from the Bank that owns them. When the Bank is destroyed, its
-        accounts are destroyed with it.
+Provides controlled access to accounts and transactions through methods, rather
+than exposing raw collections.
 
-Bank 1 ---------- * Transaction
-        composition: the ledger is a private collection created and
-        maintained entirely by the Bank (postTransaction()). Entries are
-        immutable; they are only added through the Bank.
-```
+### Customer–Account relationship
+
+A `Customer` may own multiple `Account` objects (one-to-many association).
+
+Each `Account` references its `Customer`, establishing ownership and identity.
+The reference is one-way: the `Customer` class does not keep a back-collection
+of its accounts.
+
+### Account–Transaction relationship
+
+Each `Account` records multiple `Transaction` entries (one-to-many association).
+
+Transactions capture the history of deposits, withdrawals, and transfers for
+auditing.
+
+### AuthenticationService–Bank relationship
+
+The `AuthenticationService` depends on the `Bank` to validate credentials.
+
+It interacts with accounts indirectly through the `Bank`, enforcing lockout
+policies.
+
+### Main–Bank/AuthenticationService relationship
+
+The `Main` class composes both the `Bank` and `AuthenticationService`.
+
+It delegates all business logic to these classes, focusing only on user
+interaction.
+
+### OperationResult as a communication object
+
+Returned by `Bank` and `AuthenticationService` to encapsulate outcomes.
+
+Used by `Main` to display results without needing internal details.
+
+### Format utility relationship
+
+Used by `Main`, `Bank`, and `Account` to ensure consistent formatting of
+currency and text.
+
+Not owned by any class, but shared as a helper.
 
 ### How objects collaborate at runtime
 
@@ -376,8 +497,8 @@ Bank 1 ---------- * Transaction
 3. Each menu action calls `Bank.deposit / withdraw / transfer`, which validates,
    delegates the money movement to the account(s), and records `Transaction`
    objects in the ledger.
-4. Inquiry actions read account getters; history renders `Bank.transactionsFor()`
-   entries.
+4. Inquiry actions read account getters; history renders
+   `Bank.transactionsFor()` entries.
 
 ---
 
